@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/Source/">
+    <Project Path="Source/TodoApi.API/TodoApi.API.csproj" />
+    <Project Path="Source/TodoApi.Application/TodoApi.Application.csproj" />
+    <Project Path="Source/TodoApi.Domain/TodoApi.Domain.csproj" />
+    <Project Path="Source/TodoApi.Infrastructure/TodoApi.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/Tests/">
+    <Project Path="Tests/TodoApi.Tests/TodoApi.Tests.csproj" />
+  </Folder>
+</Solution>
