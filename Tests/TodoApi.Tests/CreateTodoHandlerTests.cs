@@ -1,6 +1,6 @@
 using NSubstitute;
 using TodoApi.Application;
-using TodoApi.Application.Commands;
+using TodoApi.Application.Todos;
 using TodoApi.Domain;
 
 namespace TodoApi.Tests;

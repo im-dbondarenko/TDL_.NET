@@ -1,6 +1,6 @@
 using MediatR;
 
-namespace TodoApi.Application.Commands;
+namespace TodoApi.Application.Todos;
 
 public sealed record DeleteTodoCommand(int Id) : IRequest<bool>;
 

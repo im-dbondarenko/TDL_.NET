@@ -1,7 +1,7 @@
 using MediatR;
 using TodoApi.Domain;
 
-namespace TodoApi.Application.Queries;
+namespace TodoApi.Application.Todos;
 
 public sealed record GetTodosQuery : IRequest<List<TodoItem>>;
 

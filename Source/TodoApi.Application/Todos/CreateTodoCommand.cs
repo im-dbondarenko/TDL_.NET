@@ -1,7 +1,7 @@
 using MediatR;
 using TodoApi.Domain;
 
-namespace TodoApi.Application.Commands;
+namespace TodoApi.Application.Todos;
 
 public sealed record CreateTodoCommand(string Title, string? Description) : IRequest<TodoItem>;
 

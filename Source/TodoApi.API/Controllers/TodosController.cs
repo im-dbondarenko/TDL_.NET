@@ -1,7 +1,6 @@
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
-using TodoApi.Application.Commands;
-using TodoApi.Application.Queries;
+using TodoApi.Application.Todos;
 
 namespace TodoApi.API.Controllers;
 

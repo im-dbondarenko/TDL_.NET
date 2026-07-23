@@ -1,7 +1,7 @@
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using TodoApi.Application;
-using TodoApi.Application.Commands;
+using TodoApi.Application.Todos;
 using TodoApi.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
