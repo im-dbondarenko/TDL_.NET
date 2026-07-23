@@ -155,7 +155,8 @@ public sealed class UpdateTodoHandler(ITodoRepository repository)
 
         if (request.IsCompleted && !item.IsCompleted)
             item.CompletedAt = DateTime.UtcNow;  // только что завершили — ставим дату
-        else if (!request.IsCompleted)
+
+        if (!request.IsCompleted)
             item.CompletedAt = null;              // сняли галочку — убираем дату
 
         item.IsCompleted = request.IsCompleted;

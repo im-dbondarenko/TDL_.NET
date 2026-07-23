@@ -18,7 +18,8 @@ public sealed class UpdateTodoHandler(ITodoRepository repository) : IRequestHand
 
         if (request.IsCompleted && !item.IsCompleted)
             item.CompletedAt = DateTime.UtcNow;
-        else if (!request.IsCompleted)
+
+        if (!request.IsCompleted)
             item.CompletedAt = null;
 
         item.IsCompleted = request.IsCompleted;
