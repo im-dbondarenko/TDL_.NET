@@ -19,9 +19,9 @@ namespace TodoApi.Infrastructure.Migrations
 
             modelBuilder.Entity("TodoApi.Domain.TodoItem", b =>
                 {
-                    b.Property<int>("Id")
+                    b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("CompletedAt")
                         .HasColumnType("TEXT");

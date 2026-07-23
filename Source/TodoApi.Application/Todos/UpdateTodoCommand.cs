@@ -3,7 +3,7 @@ using TodoApi.Domain;
 
 namespace TodoApi.Application.Todos;
 
-public sealed record UpdateTodoCommand(int Id, string Title, string? Description, bool IsCompleted) : IRequest<TodoItem?>;
+public sealed record UpdateTodoCommand(Guid Id, string Title, string? Description, bool IsCompleted) : IRequest<TodoItem?>;
 
 public sealed class UpdateTodoHandler(ITodoRepository repository) : IRequestHandler<UpdateTodoCommand, TodoItem?>
 {

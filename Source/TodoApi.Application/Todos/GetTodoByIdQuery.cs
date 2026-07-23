@@ -3,7 +3,7 @@ using TodoApi.Domain;
 
 namespace TodoApi.Application.Todos;
 
-public sealed record GetTodoByIdQuery(int Id) : IRequest<TodoItem?>;
+public sealed record GetTodoByIdQuery(Guid Id) : IRequest<TodoItem?>;
 
 public sealed class GetTodoByIdHandler(ITodoRepository repository) : IRequestHandler<GetTodoByIdQuery, TodoItem?>
 {

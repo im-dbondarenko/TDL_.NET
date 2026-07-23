@@ -16,8 +16,8 @@ public sealed class TodosController(IMediator mediator) : ControllerBase
         return Ok(todos);
     }
 
-    [HttpGet("{id:int}")]
-    public async Task<IActionResult> GetById(int id, CancellationToken ct)
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> GetById(Guid id, CancellationToken ct)
     {
         var todo = await mediator.Send(new GetTodoByIdQuery(id), ct);
         return todo is not null ? Ok(todo) : NotFound();
@@ -30,8 +30,8 @@ public sealed class TodosController(IMediator mediator) : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = todo.Id }, todo);
     }
 
-    [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] UpdateTodoCommand command, CancellationToken ct)
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Update(Guid id, [FromBody] UpdateTodoCommand command, CancellationToken ct)
     {
         if (id != command.Id)
             return BadRequest("Route id must match body id");
@@ -40,8 +40,8 @@ public sealed class TodosController(IMediator mediator) : ControllerBase
         return todo is not null ? Ok(todo) : NotFound();
     }
 
-    [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(int id, CancellationToken ct)
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         var deleted = await mediator.Send(new DeleteTodoCommand(id), ct);
         return deleted ? NoContent() : NotFound();

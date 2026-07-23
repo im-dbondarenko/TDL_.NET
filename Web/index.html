@@ -294,7 +294,7 @@
                 if (editingId === t.id) {
                     return `
                         <li class="todo-item">
-                            <form class="edit-form" onsubmit="return saveEdit(event, ${t.id})">
+                            <form class="edit-form" onsubmit="return saveEdit(event, '${t.id}')">
                                 <input type="text" id="editTitle" value="${attr(t.title)}" maxlength="200" required>
                                 <textarea id="editDesc" rows="2" maxlength="1000">${esc(t.description || '')}</textarea>
                                 <div class="edit-buttons">
@@ -310,15 +310,15 @@
 
                 return `
                     <li class="todo-item ${t.isCompleted ? 'completed' : ''}">
-                        <div class="todo-check" onclick="toggle(${t.id})"></div>
-                        <div class="todo-content" onclick="startEdit(${t.id})">
+                        <div class="todo-check" onclick="toggle('${t.id}')"></div>
+                        <div class="todo-content" onclick="startEdit('${t.id}')">
                             <div class="todo-title">${esc(t.title)}</div>
                             ${t.description ? `<div class="todo-desc">${esc(t.description)}</div>` : ''}
                             <div class="todo-meta">${meta}</div>
                         </div>
                         <div class="todo-actions">
-                            <button class="todo-btn" onclick="startEdit(${t.id})" title="Edit">&#9998;</button>
-                            <button class="todo-btn delete" onclick="del(${t.id})" title="Delete">&times;</button>
+                            <button class="todo-btn" onclick="startEdit('${t.id}')" title="Edit">&#9998;</button>
+                            <button class="todo-btn delete" onclick="del('${t.id}')" title="Delete">&times;</button>
                         </div>
                     </li>`;
             }).join('');

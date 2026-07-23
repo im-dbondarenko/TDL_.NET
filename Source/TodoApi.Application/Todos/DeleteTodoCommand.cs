@@ -2,7 +2,7 @@ using MediatR;
 
 namespace TodoApi.Application.Todos;
 
-public sealed record DeleteTodoCommand(int Id) : IRequest<bool>;
+public sealed record DeleteTodoCommand(Guid Id) : IRequest<bool>;
 
 public sealed class DeleteTodoHandler(ITodoRepository repository) : IRequestHandler<DeleteTodoCommand, bool>
 {
