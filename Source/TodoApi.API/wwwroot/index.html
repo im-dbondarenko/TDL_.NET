@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Todo App</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #0f0f0f;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            padding: 40px 16px;
+        }
+
+        .app {
+            width: 100%;
+            max-width: 540px;
+        }
+
+        h1 {
+            font-size: 28px;
+            font-weight: 600;
+            margin-bottom: 24px;
+            color: #fff;
+        }
+
+        .add-form {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 32px;
+        }
+
+        .add-form input {
+            flex: 1;
+            padding: 10px 14px;
+            border: 1px solid #333;
+            border-radius: 8px;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            font-size: 15px;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+
+        .add-form input:focus {
+            border-color: #555;
+        }
+
+        .add-form button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            background: #2563eb;
+            color: #fff;
+            font-size: 15px;
+            cursor: pointer;
+            transition: background 0.15s;
+            white-space: nowrap;
+        }
+
+        .add-form button:hover { background: #1d4ed8; }
+        .add-form button:disabled { background: #333; cursor: default; }
+
+        .stats {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 12px;
+        }
+
+        .todo-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .todo-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 14px;
+            background: #1a1a1a;
+            border-radius: 8px;
+            border: 1px solid #222;
+            transition: border-color 0.15s;
+        }
+
+        .todo-item:hover { border-color: #333; }
+
+        .todo-item.completed .todo-title {
+            text-decoration: line-through;
+            color: #555;
+        }
+
+        .todo-check {
+            width: 20px;
+            height: 20px;
+            border: 2px solid #444;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: all 0.15s;
+        }
+
+        .todo-check:hover { border-color: #2563eb; }
+
+        .todo-item.completed .todo-check {
+            background: #2563eb;
+            border-color: #2563eb;
+        }
+
+        .todo-item.completed .todo-check::after {
+            content: "\2713";
+            color: #fff;
+            font-size: 12px;
+        }
+
+        .todo-content { flex: 1; min-width: 0; }
+
+        .todo-title {
+            font-size: 15px;
+            word-break: break-word;
+        }
+
+        .todo-desc {
+            font-size: 13px;
+            color: #666;
+            margin-top: 2px;
+            word-break: break-word;
+        }
+
+        .todo-delete {
+            background: none;
+            border: none;
+            color: #444;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            opacity: 0;
+            transition: all 0.15s;
+        }
+
+        .todo-item:hover .todo-delete { opacity: 1; }
+        .todo-delete:hover { color: #ef4444; background: #1f1f1f; }
+
+        .empty {
+            text-align: center;
+            color: #444;
+            padding: 40px;
+            font-size: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <h1>Todos</h1>
+
+        <form class="add-form" onsubmit="return addTodo(event)">
+            <input type="text" id="titleInput" placeholder="New todo..." maxlength="200" required>
+            <button type="submit">Add</button>
+        </form>
+
+        <div class="stats" id="stats"></div>
+        <ul class="todo-list" id="todoList"></ul>
+    </div>
+
+    <script>
+        const API = '/api/todos';
+
+        async function loadTodos() {
+            const res = await fetch(API);
+            const todos = await res.json();
+            render(todos);
+        }
+
+        function render(todos) {
+            const list = document.getElementById('todoList');
+            const stats = document.getElementById('stats');
+
+            if (todos.length === 0) {
+                list.innerHTML = '<li class="empty">No todos yet</li>';
+                stats.textContent = '';
+                return;
+            }
+
+            const done = todos.filter(t => t.isCompleted).length;
+            stats.textContent = `${done}/${todos.length} completed`;
+
+            list.innerHTML = todos.map(t => `
+                <li class="todo-item ${t.isCompleted ? 'completed' : ''}">
+                    <div class="todo-check" onclick="toggle(${t.id})"></div>
+                    <div class="todo-content">
+                        <div class="todo-title">${esc(t.title)}</div>
+                        ${t.description ? `<div class="todo-desc">${esc(t.description)}</div>` : ''}
+                    </div>
+                    <button class="todo-delete" onclick="del(${t.id})">&times;</button>
+                </li>
+            `).join('');
+        }
+
+        async function addTodo(e) {
+            e.preventDefault();
+            const input = document.getElementById('titleInput');
+            const title = input.value.trim();
+            if (!title) return false;
+
+            await fetch(API, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, description: null })
+            });
+
+            input.value = '';
+            await loadTodos();
+            return false;
+        }
+
+        async function toggle(id) {
+            const res = await fetch(`${API}/${id}`);
+            const todo = await res.json();
+
+            await fetch(`${API}/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id,
+                    title: todo.title,
+                    description: todo.description,
+                    isCompleted: !todo.isCompleted
+                })
+            });
+
+            await loadTodos();
+        }
+
+        async function del(id) {
+            await fetch(`${API}/${id}`, { method: 'DELETE' });
+            await loadTodos();
+        }
+
+        function esc(s) {
+            const d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
+        loadTodos();
+    </script>
+</body>
+</html>
