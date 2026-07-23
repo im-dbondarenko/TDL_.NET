@@ -236,6 +236,19 @@
             padding: 40px;
             font-size: 15px;
         }
+
+        .error-list {
+            list-style: none;
+            margin: 8px 0 0;
+            padding: 10px 14px;
+            background: #2a1215;
+            border: 1px solid #dc2626;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #fca5a5;
+        }
+
+        .error-list li { margin: 2px 0; }
     </style>
 </head>
 <body>
@@ -244,10 +257,11 @@
 
         <form class="add-form" onsubmit="return addTodo(event)">
             <div class="row">
-                <input type="text" id="titleInput" placeholder="New todo..." maxlength="200" required>
+                <input type="text" id="titleInput" placeholder="New todo...">
                 <button type="submit">Add</button>
             </div>
-            <textarea id="descInput" class="" placeholder="Description (optional)" maxlength="1000"></textarea>
+            <textarea id="descInput" class="" placeholder="Description (optional)"></textarea>
+            <ul class="error-list" id="addErrors" style="display:none"></ul>
         </form>
 
         <div class="stats" id="stats"></div>
@@ -295,8 +309,9 @@
                     return `
                         <li class="todo-item">
                             <form class="edit-form" onsubmit="return saveEdit(event, '${t.id}')">
-                                <input type="text" id="editTitle" value="${attr(t.title)}" maxlength="200" required>
-                                <textarea id="editDesc" rows="2" maxlength="1000">${esc(t.description || '')}</textarea>
+                                <input type="text" id="editTitle" value="${attr(t.title)}">
+                                <textarea id="editDesc" rows="2">${esc(t.description || '')}</textarea>
+                                <ul class="error-list" id="editErrors" style="display:none"></ul>
                                 <div class="edit-buttons">
                                     <button type="submit" class="save">Save</button>
                                     <button type="button" class="cancel" onclick="cancelEdit()">Cancel</button>
@@ -329,19 +344,35 @@
             }
         }
 
+        function showErrors(elementId, errors) {
+            const el = document.getElementById(elementId);
+            if (!errors || Object.keys(errors).length === 0) {
+                el.style.display = 'none';
+                el.innerHTML = '';
+                return;
+            }
+            el.innerHTML = Object.values(errors).flat().map(m => `<li>${esc(m)}</li>`).join('');
+            el.style.display = 'block';
+        }
+
         async function addTodo(e) {
             e.preventDefault();
             const title = titleInput.value.trim();
-            if (!title) return false;
-
             const description = descInput.value.trim() || null;
 
-            await fetch(API, {
+            const res = await fetch(API, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ title, description })
             });
 
+            if (!res.ok) {
+                const data = await res.json();
+                showErrors('addErrors', data.errors);
+                return false;
+            }
+
+            showErrors('addErrors', null);
             titleInput.value = '';
             descInput.value = '';
             descInput.classList.remove('visible');
@@ -380,14 +411,12 @@
         async function saveEdit(e, id) {
             e.preventDefault();
             const title = document.getElementById('editTitle').value.trim();
-            if (!title) return false;
-
             const description = document.getElementById('editDesc').value.trim() || null;
 
-            const res = await fetch(`${API}/${id}`);
-            const todo = await res.json();
+            const getRes = await fetch(`${API}/${id}`);
+            const todo = await getRes.json();
 
-            await fetch(`${API}/${id}`, {
+            const res = await fetch(`${API}/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -397,6 +426,12 @@
                     isCompleted: todo.isCompleted
                 })
             });
+
+            if (!res.ok) {
+                const data = await res.json();
+                showErrors('editErrors', data.errors);
+                return false;
+            }
 
             editingId = null;
             await loadTodos();
