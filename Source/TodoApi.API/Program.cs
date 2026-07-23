@@ -9,6 +9,9 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddCors(options =>
+    options.AddDefaultPolicy(policy =>
+        policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader()));
 
 builder.Services.AddDbContext<TodoDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=todo.db"));
@@ -25,8 +28,7 @@ using (var scope = app.Services.CreateScope())
     db.Database.Migrate();
 }
 
-app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseCors();
 app.UseSwagger();
 app.UseSwaggerUI();
 app.MapControllers();
