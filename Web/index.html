@@ -31,24 +31,44 @@
 
         .add-form {
             display: flex;
+            flex-direction: column;
             gap: 8px;
             margin-bottom: 32px;
         }
 
-        .add-form input {
+        .add-form .row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .add-form input, .add-form textarea {
             flex: 1;
             padding: 10px 14px;
             border: 1px solid #333;
             border-radius: 8px;
             background: #1a1a1a;
             color: #e0e0e0;
+            font-family: inherit;
             font-size: 15px;
             outline: none;
             transition: border-color 0.15s;
+            resize: none;
         }
 
-        .add-form input:focus {
-            border-color: #555;
+        .add-form input:focus, .add-form textarea:focus { border-color: #555; }
+
+        .add-form textarea {
+            height: 0;
+            padding: 0 14px;
+            border: none;
+            overflow: hidden;
+            transition: height 0.15s, padding 0.15s, border 0.15s;
+        }
+
+        .add-form textarea.visible {
+            height: 60px;
+            padding: 10px 14px;
+            border: 1px solid #333;
         }
 
         .add-form button {
@@ -64,7 +84,6 @@
         }
 
         .add-form button:hover { background: #1d4ed8; }
-        .add-form button:disabled { background: #333; cursor: default; }
 
         .stats {
             font-size: 13px;
@@ -81,7 +100,7 @@
 
         .todo-item {
             display: flex;
-            align-items: center;
+            align-items: flex-start;
             gap: 12px;
             padding: 12px 14px;
             background: #1a1a1a;
@@ -100,6 +119,7 @@
         .todo-check {
             width: 20px;
             height: 20px;
+            margin-top: 2px;
             border: 2px solid #444;
             border-radius: 50%;
             cursor: pointer;
@@ -123,7 +143,11 @@
             font-size: 12px;
         }
 
-        .todo-content { flex: 1; min-width: 0; }
+        .todo-content {
+            flex: 1;
+            min-width: 0;
+            cursor: pointer;
+        }
 
         .todo-title {
             font-size: 15px;
@@ -137,20 +161,74 @@
             word-break: break-word;
         }
 
-        .todo-delete {
+        .todo-meta {
+            font-size: 11px;
+            color: #444;
+            margin-top: 4px;
+        }
+
+        .todo-actions {
+            display: flex;
+            gap: 2px;
+            flex-shrink: 0;
+        }
+
+        .todo-btn {
             background: none;
             border: none;
             color: #444;
-            font-size: 18px;
+            font-size: 14px;
             cursor: pointer;
-            padding: 4px 8px;
+            padding: 4px 6px;
             border-radius: 4px;
             opacity: 0;
             transition: all 0.15s;
         }
 
-        .todo-item:hover .todo-delete { opacity: 1; }
-        .todo-delete:hover { color: #ef4444; background: #1f1f1f; }
+        .todo-item:hover .todo-btn { opacity: 1; }
+        .todo-btn:hover { color: #e0e0e0; background: #1f1f1f; }
+        .todo-btn.delete:hover { color: #ef4444; }
+
+        .edit-form {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            flex: 1;
+        }
+
+        .edit-form input, .edit-form textarea {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #444;
+            border-radius: 6px;
+            background: #111;
+            color: #e0e0e0;
+            font-family: inherit;
+            font-size: 14px;
+            outline: none;
+            resize: none;
+        }
+
+        .edit-form input:focus, .edit-form textarea:focus { border-color: #2563eb; }
+
+        .edit-form .edit-buttons {
+            display: flex;
+            gap: 6px;
+        }
+
+        .edit-form button {
+            padding: 6px 14px;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .edit-form .save { background: #2563eb; color: #fff; }
+        .edit-form .save:hover { background: #1d4ed8; }
+        .edit-form .cancel { background: #333; color: #aaa; }
+        .edit-form .cancel:hover { background: #444; }
 
         .empty {
             text-align: center;
@@ -165,8 +243,11 @@
         <h1>Todos</h1>
 
         <form class="add-form" onsubmit="return addTodo(event)">
-            <input type="text" id="titleInput" placeholder="New todo..." maxlength="200" required>
-            <button type="submit">Add</button>
+            <div class="row">
+                <input type="text" id="titleInput" placeholder="New todo..." maxlength="200" required>
+                <button type="submit">Add</button>
+            </div>
+            <textarea id="descInput" class="" placeholder="Description (optional)" maxlength="1000"></textarea>
         </form>
 
         <div class="stats" id="stats"></div>
@@ -175,11 +256,25 @@
 
     <script>
         const API = 'http://localhost:5279/api/todos';
+        let editingId = null;
+
+        const titleInput = document.getElementById('titleInput');
+        const descInput = document.getElementById('descInput');
+
+        titleInput.addEventListener('input', () => {
+            descInput.classList.toggle('visible', titleInput.value.trim().length > 0);
+        });
 
         async function loadTodos() {
             const res = await fetch(API);
             const todos = await res.json();
             render(todos);
+        }
+
+        function formatDate(iso) {
+            if (!iso) return null;
+            const d = new Date(iso);
+            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         }
 
         function render(todos) {
@@ -195,31 +290,61 @@
             const done = todos.filter(t => t.isCompleted).length;
             stats.textContent = `${done}/${todos.length} completed`;
 
-            list.innerHTML = todos.map(t => `
-                <li class="todo-item ${t.isCompleted ? 'completed' : ''}">
-                    <div class="todo-check" onclick="toggle(${t.id})"></div>
-                    <div class="todo-content">
-                        <div class="todo-title">${esc(t.title)}</div>
-                        ${t.description ? `<div class="todo-desc">${esc(t.description)}</div>` : ''}
-                    </div>
-                    <button class="todo-delete" onclick="del(${t.id})">&times;</button>
-                </li>
-            `).join('');
+            list.innerHTML = todos.map(t => {
+                if (editingId === t.id) {
+                    return `
+                        <li class="todo-item">
+                            <form class="edit-form" onsubmit="return saveEdit(event, ${t.id})">
+                                <input type="text" id="editTitle" value="${attr(t.title)}" maxlength="200" required>
+                                <textarea id="editDesc" rows="2" maxlength="1000">${esc(t.description || '')}</textarea>
+                                <div class="edit-buttons">
+                                    <button type="submit" class="save">Save</button>
+                                    <button type="button" class="cancel" onclick="cancelEdit()">Cancel</button>
+                                </div>
+                            </form>
+                        </li>`;
+                }
+
+                let meta = `Created ${formatDate(t.createdAt)}`;
+                if (t.completedAt) meta += ` · Done ${formatDate(t.completedAt)}`;
+
+                return `
+                    <li class="todo-item ${t.isCompleted ? 'completed' : ''}">
+                        <div class="todo-check" onclick="toggle(${t.id})"></div>
+                        <div class="todo-content" onclick="startEdit(${t.id})">
+                            <div class="todo-title">${esc(t.title)}</div>
+                            ${t.description ? `<div class="todo-desc">${esc(t.description)}</div>` : ''}
+                            <div class="todo-meta">${meta}</div>
+                        </div>
+                        <div class="todo-actions">
+                            <button class="todo-btn" onclick="startEdit(${t.id})" title="Edit">&#9998;</button>
+                            <button class="todo-btn delete" onclick="del(${t.id})" title="Delete">&times;</button>
+                        </div>
+                    </li>`;
+            }).join('');
+
+            if (editingId !== null) {
+                const el = document.getElementById('editTitle');
+                if (el) el.focus();
+            }
         }
 
         async function addTodo(e) {
             e.preventDefault();
-            const input = document.getElementById('titleInput');
-            const title = input.value.trim();
+            const title = titleInput.value.trim();
             if (!title) return false;
+
+            const description = descInput.value.trim() || null;
 
             await fetch(API, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title, description: null })
+                body: JSON.stringify({ title, description })
             });
 
-            input.value = '';
+            titleInput.value = '';
+            descInput.value = '';
+            descInput.classList.remove('visible');
             await loadTodos();
             return false;
         }
@@ -242,6 +367,42 @@
             await loadTodos();
         }
 
+        function startEdit(id) {
+            editingId = id;
+            loadTodos();
+        }
+
+        function cancelEdit() {
+            editingId = null;
+            loadTodos();
+        }
+
+        async function saveEdit(e, id) {
+            e.preventDefault();
+            const title = document.getElementById('editTitle').value.trim();
+            if (!title) return false;
+
+            const description = document.getElementById('editDesc').value.trim() || null;
+
+            const res = await fetch(`${API}/${id}`);
+            const todo = await res.json();
+
+            await fetch(`${API}/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id,
+                    title,
+                    description,
+                    isCompleted: todo.isCompleted
+                })
+            });
+
+            editingId = null;
+            await loadTodos();
+            return false;
+        }
+
         async function del(id) {
             await fetch(`${API}/${id}`, { method: 'DELETE' });
             await loadTodos();
@@ -251,6 +412,10 @@
             const d = document.createElement('div');
             d.textContent = s;
             return d.innerHTML;
+        }
+
+        function attr(s) {
+            return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
         }
 
         loadTodos();
