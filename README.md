@@ -44,7 +44,7 @@ HTTP request
             -> EF Core -> SQLite
 ```
 
-**CQRS split:**
+**CQRS split** (all in `TodoApi.Application/Todos/` — grouped by domain entity, Skynet convention):
 - **Commands** (write): `CreateTodoCommand`, `UpdateTodoCommand`, `DeleteTodoCommand`
 - **Queries** (read): `GetTodosQuery`, `GetTodoByIdQuery`
 

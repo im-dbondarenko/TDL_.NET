@@ -110,17 +110,17 @@ public interface ITodoRepository
 
 **Почему сначала интерфейс:** handler'ы будут зависеть от `ITodoRepository`. Реализация будет позже в Infrastructure, но handler'ам она не нужна — им достаточно контракта.
 
-### 3.2. Queries (чтение)
+### 3.2. Queries и Commands
 
-Создать папку `Queries/` и написать два файла:
+Создать папку `Todos/` — все commands, queries и validators для одной сущности живут рядом (группировка по домену, конвенция Skynet):
 
-`Source/TodoApi.Application/Queries/GetTodosQuery.cs`:
+`Source/TodoApi.Application/Todos/GetTodosQuery.cs`:
 
 ```csharp
 using MediatR;
 using TodoApi.Domain;
 
-namespace TodoApi.Application.Queries;
+namespace TodoApi.Application.Todos;
 
 public sealed record GetTodosQuery : IRequest<List<TodoItem>>;
 
@@ -132,26 +132,22 @@ public sealed class GetTodosHandler(ITodoRepository repository)
 }
 ```
 
-`Source/TodoApi.Application/Queries/GetTodoByIdQuery.cs` — аналогично, с `int Id` параметром.
+`Source/TodoApi.Application/Todos/GetTodoByIdQuery.cs` — аналогично, с `int Id` параметром.
 
-**Почему queries раньше commands:** queries проще (нет валидации, нет побочных эффектов) — хорошая точка, чтобы убедиться, что MediatR-конвенция `record` + `Handler` работает, прежде чем усложнять.
-
-### 3.3. Commands (запись)
-
-Создать папку `Commands/` и написать три файла:
+Затем три command-файла в той же папке `Todos/`:
 
 - `CreateTodoCommand.cs` — создание задачи
 - `UpdateTodoCommand.cs` — обновление (с логикой `CompletedAt`)
 - `DeleteTodoCommand.cs` — удаление
 
-### 3.4. Validator
+### 3.3. Validator
 
-`Source/TodoApi.Application/Commands/CreateTodoCommandValidator.cs`:
+`Source/TodoApi.Application/Todos/CreateTodoCommandValidator.cs`:
 
 ```csharp
 using FluentValidation;
 
-namespace TodoApi.Application.Commands;
+namespace TodoApi.Application.Todos;
 
 public sealed class CreateTodoCommandValidator : AbstractValidator<CreateTodoCommand>
 {
@@ -422,7 +418,7 @@ git commit -m "feat: Todo API with Clean Architecture + MediatR + EF Core"
 |---|---|---|
 | `TodoItem` | Domain | Своя сущность (`Product`, `Order`, `User`) |
 | `ITodoRepository` | Application | Свой интерфейс с нужными методами |
-| `CreateTodoCommand` | Application/Commands | Своя команда с нужными полями |
+| `CreateTodoCommand` | Application/Todos | Своя команда с нужными полями |
 | `TodoDbContext` + `DbSet<TodoItem>` | Infrastructure | Свой контекст + свои DbSet'ы |
 | `TodoRepository` | Infrastructure | Своя реализация |
 | `TodosController` | API/Controllers | Свой контроллер с нужными endpoints |

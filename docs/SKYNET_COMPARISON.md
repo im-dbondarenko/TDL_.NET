@@ -112,7 +112,7 @@ public sealed class TagsController : ControllerBase
 
 ## 3. MediatR Command + Handler
 
-### Todo API — `Source/TodoApi.Application/Commands/CreateTodoCommand.cs`
+### Todo API — `Source/TodoApi.Application/Todos/CreateTodoCommand.cs`
 
 ```csharp
 public sealed record CreateTodoCommand(string Title, string? Description) : IRequest<TodoItem>;
@@ -167,7 +167,7 @@ internal sealed class CreateLoanExceptionCommandHandler(
 
 ## 4. MediatR Query + Handler
 
-### Todo API — `Source/TodoApi.Application/Queries/GetTodoByIdQuery.cs`
+### Todo API — `Source/TodoApi.Application/Todos/GetTodoByIdQuery.cs`
 
 ```csharp
 public sealed record GetTodoByIdQuery(int Id) : IRequest<TodoItem?>;
@@ -330,7 +330,7 @@ internal sealed class PurchaseAdviceRepository(LoansDbContext db) : IPurchaseAdv
 
 ## 7. FluentValidation
 
-### Todo API — `Source/TodoApi.Application/Commands/CreateTodoCommandValidator.cs`
+### Todo API — `Source/TodoApi.Application/Todos/CreateTodoCommandValidator.cs`
 
 ```csharp
 public sealed class CreateTodoCommandValidator : AbstractValidator<CreateTodoCommand>
