@@ -47,7 +47,7 @@ namespace TodoApi.Domain;
 
 public sealed class TodoItem
 {
-    public int Id { get; set; }
+    public Guid Id { get; set; } = Guid.NewGuid();
     public required string Title { get; set; }
     public string? Description { get; set; }
     public bool IsCompleted { get; set; }
@@ -101,7 +101,7 @@ namespace TodoApi.Application;
 public interface ITodoRepository
 {
     Task<List<TodoItem>> GetAllAsync(CancellationToken ct);
-    Task<TodoItem?> GetByIdAsync(int id, CancellationToken ct);
+    Task<TodoItem?> GetByIdAsync(Guid id, CancellationToken ct);
     Task<TodoItem> CreateAsync(TodoItem item, CancellationToken ct);
     Task UpdateAsync(TodoItem item, CancellationToken ct);
     Task DeleteAsync(TodoItem item, CancellationToken ct);
@@ -132,7 +132,7 @@ public sealed class GetTodosHandler(ITodoRepository repository)
 }
 ```
 
-`Source/TodoApi.Application/Todos/GetTodoByIdQuery.cs` — аналогично, с `int Id` параметром.
+`Source/TodoApi.Application/Todos/GetTodoByIdQuery.cs` — аналогично, с `Guid Id` параметром.
 
 Затем три command-файла в той же папке `Todos/`:
 
@@ -140,28 +140,63 @@ public sealed class GetTodosHandler(ITodoRepository repository)
 - `UpdateTodoCommand.cs` — обновление (с логикой `CompletedAt`)
 - `DeleteTodoCommand.cs` — удаление
 
-### 3.3. Validator
+### 3.3. Shared validation rules + Validators
+
+Сначала общие правила, потом validators, потом pipeline behavior. Подробности — [docs/VALIDATION.md](VALIDATION.md).
+
+`Source/TodoApi.Application/Todos/TodoValidationRules.cs` — extension methods для переиспользования:
+
+```csharp
+public static partial class TodoValidationRules
+{
+    [GeneratedRegex(@"^[a-zA-Z0-9\s\p{P}\p{S}]*$")]
+    private static partial Regex LatinOnlyRegex();
+
+    public static IRuleBuilderOptions<T, string> ValidTitle<T>(this IRuleBuilder<T, string> rule)
+    {
+        return rule
+            .NotEmpty().WithMessage("Title is required")
+            .MaximumLength(200).WithMessage("Title must be 200 characters or fewer")
+            .Matches(LatinOnlyRegex()).WithMessage("Title must contain only Latin characters");
+    }
+
+    public static IRuleBuilderOptions<T, string?> ValidDescription<T>(this IRuleBuilder<T, string?> rule)
+    {
+        return rule
+            .MaximumLength(1000).WithMessage("Description must be 1000 characters or fewer")
+            .Matches(LatinOnlyRegex()).WithMessage("Description must contain only Latin characters");
+    }
+}
+```
 
 `Source/TodoApi.Application/Todos/CreateTodoCommandValidator.cs`:
 
 ```csharp
-using FluentValidation;
-
-namespace TodoApi.Application.Todos;
-
 public sealed class CreateTodoCommandValidator : AbstractValidator<CreateTodoCommand>
 {
     public CreateTodoCommandValidator()
     {
-        RuleFor(x => x.Title)
-            .NotEmpty().WithMessage("Title is required")
-            .MaximumLength(200).WithMessage("Title must be 200 characters or fewer");
-
-        RuleFor(x => x.Description)
-            .MaximumLength(1000).WithMessage("Description must be 1000 characters or fewer");
+        RuleFor(x => x.Title).ValidTitle();
+        RuleFor(x => x.Description).ValidDescription();
     }
 }
 ```
+
+`Source/TodoApi.Application/Todos/UpdateTodoCommandValidator.cs` — те же правила + проверка Id:
+
+```csharp
+public sealed class UpdateTodoCommandValidator : AbstractValidator<UpdateTodoCommand>
+{
+    public UpdateTodoCommandValidator()
+    {
+        RuleFor(x => x.Id).NotEmpty().WithMessage("Id is required");
+        RuleFor(x => x.Title).ValidTitle();
+        RuleFor(x => x.Description).ValidDescription();
+    }
+}
+```
+
+`Source/TodoApi.Application/Todos/ValidationBehavior.cs` — MediatR pipeline, автоматически запускает валидацию ДО handler'а.
 
 Проверить компиляцию:
 
@@ -340,13 +375,13 @@ curl -X POST http://localhost:5279/api/todos \
 # Получить все задачи:
 curl http://localhost:5279/api/todos
 
-# Обновить задачу (пометить выполненной):
-curl -X PUT http://localhost:5279/api/todos/1 \
+# Обновить задачу (подставь реальный id из ответа выше):
+curl -X PUT http://localhost:5279/api/todos/<guid-from-response> \
   -H "Content-Type: application/json" \
-  -d '{"id": 1, "title": "Buy milk", "description": "2% fat", "isCompleted": true}'
+  -d '{"id": "<guid-from-response>", "title": "Buy milk", "description": "2% fat", "isCompleted": true}'
 
 # Удалить задачу:
-curl -X DELETE http://localhost:5279/api/todos/1
+curl -X DELETE http://localhost:5279/api/todos/<guid-from-response>
 ```
 
 ---

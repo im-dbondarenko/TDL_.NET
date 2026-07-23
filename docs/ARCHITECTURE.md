@@ -38,7 +38,7 @@ API  ──────►  Infrastructure  ──────►  Application  
 ```csharp
 public sealed class TodoItem
 {
-    public int Id { get; set; }
+    public Guid Id { get; set; } = Guid.NewGuid();
     public required string Title { get; set; }
     public string? Description { get; set; }
     public bool IsCompleted { get; set; }
@@ -50,6 +50,7 @@ public sealed class TodoItem
 **Что тут происходит:**
 
 - `sealed` — запрещает наследование. Конвенция Skynet: если класс не задумывался как базовый, делай его `sealed`.
+- `Guid Id { get; set; } = Guid.NewGuid()` — уникальный идентификатор (UUID). Генерируется на стороне клиента, не базы данных. `Guid` вместо `int` — конвенция Skynet: нельзя угадать (безопасность), можно генерировать распределённо (нет конфликтов), не нужен autoincrement.
 - `required string Title` — компилятор не даст создать `TodoItem` без `Title`. Без `required` можно случайно написать `new TodoItem()` и получить `null` в `Title`.
 - `string? Description` — знак `?` значит "это поле может быть null". Без `?` компилятор предупредит, если ты попытаешься записать туда `null`.
 - `DateTime CreatedAt { get; set; } = DateTime.UtcNow` — значение по умолчанию: если не задать явно, возьмёт текущее UTC-время.
@@ -76,7 +77,7 @@ public sealed class TodoItem
 public interface ITodoRepository
 {
     Task<List<TodoItem>> GetAllAsync(CancellationToken ct);
-    Task<TodoItem?> GetByIdAsync(int id, CancellationToken ct);
+    Task<TodoItem?> GetByIdAsync(Guid id, CancellationToken ct);
     Task<TodoItem> CreateAsync(TodoItem item, CancellationToken ct);
     Task UpdateAsync(TodoItem item, CancellationToken ct);
     Task DeleteAsync(TodoItem item, CancellationToken ct);
@@ -139,7 +140,7 @@ public sealed class CreateTodoHandler : IRequestHandler<CreateTodoCommand, TodoI
 #### UpdateTodoCommand.cs
 
 ```csharp
-public sealed record UpdateTodoCommand(int Id, string Title, string? Description, bool IsCompleted)
+public sealed record UpdateTodoCommand(Guid Id, string Title, string? Description, bool IsCompleted)
     : IRequest<TodoItem?>;
 
 public sealed class UpdateTodoHandler(ITodoRepository repository)
@@ -174,7 +175,7 @@ public sealed class UpdateTodoHandler(ITodoRepository repository)
 #### DeleteTodoCommand.cs
 
 ```csharp
-public sealed record DeleteTodoCommand(int Id) : IRequest<bool>;
+public sealed record DeleteTodoCommand(Guid Id) : IRequest<bool>;
 ```
 
 Возвращает `bool`: `true` — удалено, `false` — не нашли (контроллер вернёт 404).
@@ -199,10 +200,41 @@ public sealed class GetTodosHandler(ITodoRepository repository)
 #### GetTodoByIdQuery.cs
 
 ```csharp
-public sealed record GetTodoByIdQuery(int Id) : IRequest<TodoItem?>;
+public sealed record GetTodoByIdQuery(Guid Id) : IRequest<TodoItem?>;
 ```
 
 ### Validators — правила валидации
+
+Валидация — отдельная подсистема. Подробная документация: [docs/VALIDATION.md](VALIDATION.md).
+
+#### TodoValidationRules.cs — общие правила (переиспользуются)
+
+```csharp
+public static partial class TodoValidationRules
+{
+    [GeneratedRegex(@"^[a-zA-Z0-9\s\p{P}\p{S}]*$")]
+    private static partial Regex LatinOnlyRegex();
+
+    public static IRuleBuilderOptions<T, string> ValidTitle<T>(this IRuleBuilder<T, string> rule)
+    {
+        return rule
+            .NotEmpty().WithMessage("Title is required")
+            .MaximumLength(200).WithMessage("Title must be 200 characters or fewer")
+            .Matches(LatinOnlyRegex()).WithMessage("Title must contain only Latin characters");
+    }
+
+    public static IRuleBuilderOptions<T, string?> ValidDescription<T>(this IRuleBuilder<T, string?> rule)
+    {
+        return rule
+            .MaximumLength(1000).WithMessage("Description must be 1000 characters or fewer")
+            .Matches(LatinOnlyRegex()).WithMessage("Description must contain only Latin characters");
+    }
+}
+```
+
+Правила вынесены в extension methods. `ValidTitle()` и `ValidDescription()` используются и в `CreateTodoCommandValidator`, и в `UpdateTodoCommandValidator` — одно место правды.
+
+**`[GeneratedRegex]`** + `partial` — compile-time regex: компилятор создаёт оптимизированный код, не парсит regex на каждый вызов.
 
 #### CreateTodoCommandValidator.cs
 
@@ -211,17 +243,55 @@ public sealed class CreateTodoCommandValidator : AbstractValidator<CreateTodoCom
 {
     public CreateTodoCommandValidator()
     {
-        RuleFor(x => x.Title)
-            .NotEmpty().WithMessage("Title is required")
-            .MaximumLength(200).WithMessage("Title must be 200 characters or fewer");
-
-        RuleFor(x => x.Description)
-            .MaximumLength(1000).WithMessage("Description must be 1000 characters or fewer");
+        RuleFor(x => x.Title).ValidTitle();
+        RuleFor(x => x.Description).ValidDescription();
     }
 }
 ```
 
-FluentValidation позволяет писать правила декларативно. `RuleFor(x => x.Title)` — "для поля Title применяй такие правила". Каждое правило цепочкой: `.NotEmpty()` + `.MaximumLength(200)`.
+#### UpdateTodoCommandValidator.cs
+
+```csharp
+public sealed class UpdateTodoCommandValidator : AbstractValidator<UpdateTodoCommand>
+{
+    public UpdateTodoCommandValidator()
+    {
+        RuleFor(x => x.Id).NotEmpty().WithMessage("Id is required");
+        RuleFor(x => x.Title).ValidTitle();
+        RuleFor(x => x.Description).ValidDescription();
+    }
+}
+```
+
+#### ValidationBehavior.cs — автоматический запуск валидации
+
+```csharp
+public sealed class ValidationBehavior<TRequest, TResponse>(IEnumerable<IValidator<TRequest>> validators)
+    : IPipelineBehavior<TRequest, TResponse>
+    where TRequest : notnull
+{
+    public async Task<TResponse> Handle(TRequest request, RequestHandlerDelegate<TResponse> next, CancellationToken ct)
+    {
+        if (!validators.Any())
+            return await next(ct);
+
+        var context = new ValidationContext<TRequest>(request);
+        var failures = (await Task.WhenAll(validators.Select(v => v.ValidateAsync(context, ct))))
+            .SelectMany(r => r.Errors)
+            .Where(f => f is not null)
+            .ToList();
+
+        if (failures.Count > 0)
+            throw new ValidationException(failures);
+
+        return await next(ct);
+    }
+}
+```
+
+**`IPipelineBehavior<TRequest, TResponse>`** — middleware MediatR. Встраивается между контроллером и handler'ом. Каждый запрос проходит через ValidationBehavior ДО handler'а. Если есть ошибки — бросает `ValidationException`, handler не вызывается.
+
+FluentValidation позволяет писать правила декларативно. `RuleFor(x => x.Title)` — "для поля Title применяй такие правила". Каждое правило цепочкой: `.NotEmpty()` + `.MaximumLength(200)` + `.Matches()`.
 
 ---
 
@@ -268,14 +338,14 @@ public sealed class TodoRepository(TodoDbContext db) : ITodoRepository
     public Task<List<TodoItem>> GetAllAsync(CancellationToken ct)
         => db.Todos.OrderByDescending(t => t.CreatedAt).ToListAsync(ct);
 
-    public Task<TodoItem?> GetByIdAsync(int id, CancellationToken ct)
+    public Task<TodoItem?> GetByIdAsync(Guid id, CancellationToken ct)
         => db.Todos.FindAsync([id], ct).AsTask();
 
     public async Task<TodoItem> CreateAsync(TodoItem item, CancellationToken ct)
     {
         db.Todos.Add(item);          // пометить как "новый" в change tracker
         await db.SaveChangesAsync(ct); // сгенерировать INSERT и выполнить
-        return item;                   // item.Id теперь заполнен базой данных
+        return item;                   // item.Id уже заполнен (Guid.NewGuid() в конструкторе)
     }
 
     public Task UpdateAsync(TodoItem item, CancellationToken ct)
@@ -302,8 +372,8 @@ public sealed class TodoRepository(TodoDbContext db) : ITodoRepository
 
 ```
 Migrations/
-  20260720144404_InitialCreate.cs          <-- что менять (Up/Down)
-  20260720144404_InitialCreate.Designer.cs <-- снапшот модели на момент миграции
+  20260723144303_InitialCreate.cs          <-- что менять (Up/Down)
+  20260723144303_InitialCreate.Designer.cs <-- снапшот модели на момент миграции
   TodoDbContextModelSnapshot.cs            <-- текущее состояние модели
 ```
 
@@ -336,8 +406,8 @@ public sealed class TodosController(IMediator mediator) : ControllerBase
         return Ok(todos);                                    // 200 + JSON
     }
 
-    [HttpGet("{id:int}")]
-    public async Task<IActionResult> GetById(int id, CancellationToken ct)
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> GetById(Guid id, CancellationToken ct)
     {
         var todo = await mediator.Send(new GetTodoByIdQuery(id), ct);
         return todo is not null ? Ok(todo) : NotFound();     // 200 или 404
@@ -350,8 +420,8 @@ public sealed class TodosController(IMediator mediator) : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = todo.Id }, todo);  // 201
     }
 
-    [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] UpdateTodoCommand command, CancellationToken ct)
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Update(Guid id, [FromBody] UpdateTodoCommand command, CancellationToken ct)
     {
         if (id != command.Id)
             return BadRequest("Route id must match body id");  // 400
@@ -360,8 +430,8 @@ public sealed class TodosController(IMediator mediator) : ControllerBase
         return todo is not null ? Ok(todo) : NotFound();       // 200 или 404
     }
 
-    [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(int id, CancellationToken ct)
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         var deleted = await mediator.Send(new DeleteTodoCommand(id), ct);
         return deleted ? NoContent() : NotFound();             // 204 или 404
@@ -372,13 +442,13 @@ public sealed class TodosController(IMediator mediator) : ControllerBase
 **Атрибуты:**
 - `[ApiController]` — включает автоматическую валидацию модели и привязку параметров
 - `[Route("api/[controller]")]` — `[controller]` заменяется на имя класса без суффикса: `TodosController` → `api/todos`
-- `[HttpGet("{id:int}")]` — `{id:int}` значит: параметр `id` должен быть целым числом. `/api/todos/abc` вернёт 404, а не ошибку.
+- `[HttpGet("{id:guid}")]` — `{id:guid}` значит: параметр `id` должен быть валидным GUID. `/api/todos/abc` вернёт 404, а не ошибку.
 - `[FromBody]` — десериализовать тело запроса из JSON в объект
 - `[Produces("application/json")]` — подсказка для Swagger: все ответы в JSON
 
 **HTTP-коды:**
 - `Ok()` → 200
-- `CreatedAtAction()` → 201 + заголовок `Location: /api/todos/1`
+- `CreatedAtAction()` → 201 + заголовок `Location: /api/todos/{guid}`
 - `NoContent()` → 204 (удалено, тело ответа пустое)
 - `BadRequest()` → 400
 - `NotFound()` → 404
@@ -394,6 +464,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();              // контроллеры
 builder.Services.AddEndpointsApiExplorer();     // для Swagger
 builder.Services.AddSwaggerGen();               // Swagger UI
+builder.Services.AddCors(...);                  // разрешить запросы с UI (port 3000)
 
 builder.Services.AddDbContext<TodoDbContext>(options =>
     options.UseSqlite("Data Source=todo.db"));   // EF Core + SQLite
@@ -402,7 +473,10 @@ builder.Services.AddScoped<ITodoRepository, TodoRepository>();  // когда к
                                                                 // ITodoRepository — дай TodoRepository
 
 builder.Services.AddMediatR(cfg =>
-    cfg.RegisterServicesFromAssemblyContaining<CreateTodoCommand>());  // найди все handlers
+{
+    cfg.RegisterServicesFromAssemblyContaining<CreateTodoCommand>();  // найди все handlers
+    cfg.AddOpenBehavior(typeof(ValidationBehavior<,>));              // валидация ДО handler'а
+});
 
 builder.Services.AddValidatorsFromAssemblyContaining<CreateTodoCommandValidator>();  // найди все validators
 
@@ -416,6 +490,20 @@ using (var scope = app.Services.CreateScope())
 }
 
 // 3. Middleware pipeline:
+app.UseCors();
+app.UseExceptionHandler(err => err.Run(async context =>   // ловит ValidationException → 400 JSON
+{
+    var exception = context.Features.Get<IExceptionHandlerFeature>()?.Error;
+    if (exception is ValidationException validationException)
+    {
+        context.Response.StatusCode = 400;
+        context.Response.ContentType = "application/json";
+        var errors = validationException.Errors
+            .GroupBy(e => e.PropertyName)
+            .ToDictionary(g => g.Key, g => g.Select(e => e.ErrorMessage).ToArray());
+        await context.Response.WriteAsJsonAsync(new { errors });
+    }
+}));
 app.UseSwagger();       // endpoint /swagger/v1/swagger.json
 app.UseSwaggerUI();     // endpoint /swagger — интерактивная документация
 app.MapControllers();   // привязать контроллеры к роутам
@@ -425,6 +513,10 @@ app.Run();              // запустить Kestrel-сервер
 **`AddScoped`** — создаёт новый экземпляр сервиса на каждый HTTP-запрос. Один запрос = один `TodoRepository` = один `TodoDbContext` = одна транзакция.
 
 **`RegisterServicesFromAssemblyContaining<T>`** — MediatR сканирует сборку, где лежит `T`, и находит все `IRequestHandler<,>` автоматически.
+
+**`AddOpenBehavior(typeof(ValidationBehavior<,>))`** — регистрирует `ValidationBehavior` как pipeline middleware MediatR. Теперь КАЖДЫЙ запрос проходит валидацию автоматически.
+
+**`UseExceptionHandler`** — ловит `ValidationException` из pipeline и превращает его в HTTP 400 с JSON `{ "errors": { "Title": ["..."], "Description": ["..."] } }`. Без этого middleware exception превратился бы в 500.
 
 ---
 
@@ -477,28 +569,35 @@ public sealed class CreateTodoHandlerTests
 
 3. TodosController.Create() вызывает mediator.Send(command)
 
-4. MediatR находит CreateTodoHandler по типу команды
+4. MediatR запускает ValidationBehavior ПЕРЕД handler'ом:
+   - Находит CreateTodoCommandValidator
+   - Вызывает ValidTitle() → OK, ValidDescription() → OK
+   - Ошибок нет → пропускает дальше
 
-5. CreateTodoHandler.Handle():
+5. MediatR находит CreateTodoHandler по типу команды
+
+6. CreateTodoHandler.Handle():
    - Создаёт new TodoItem { Title = "Buy milk" }
+     (Id = Guid.NewGuid() генерируется автоматически)
    - Вызывает repository.CreateAsync(item)
 
-6. TodoRepository.CreateAsync():
+7. TodoRepository.CreateAsync():
    - db.Todos.Add(item)      → EF помечает объект как "новый"
    - db.SaveChangesAsync()   → EF генерирует SQL:
-     INSERT INTO Todos (Title, Description, IsCompleted, CreatedAt, CompletedAt)
-     VALUES ('Buy milk', NULL, 0, '2026-07-20T14:44:04Z', NULL)
-   - SQLite записывает на диск, возвращает Id = 1
-   - EF заполняет item.Id = 1
+     INSERT INTO Todos (Id, Title, Description, IsCompleted, CreatedAt, CompletedAt)
+     VALUES ('a1b2c3d4-...', 'Buy milk', NULL, 0, '2026-07-20T14:44:04Z', NULL)
+   - SQLite записывает на диск
 
-7. Handler возвращает item контроллеру
+8. Handler возвращает item контроллеру
 
-8. Контроллер вызывает CreatedAtAction() → ASP.NET Core:
+9. Контроллер вызывает CreatedAtAction() → ASP.NET Core:
    - Сериализует item в JSON
    - Ставит HTTP-код 201
-   - Добавляет заголовок Location: /api/todos/1
+   - Добавляет заголовок Location: /api/todos/a1b2c3d4-...
    - Отправляет ответ клиенту
 ```
+
+Если бы Title был пустой или содержал кириллицу, шаг 4 бросил бы `ValidationException` → `UseExceptionHandler` middleware поймал бы его → клиент получил бы HTTP 400 с JSON ошибок. Handler (шаг 6) не вызвался бы.
 
 ---
 

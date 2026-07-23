@@ -11,7 +11,7 @@
 ```csharp
 public sealed class TodoItem
 {
-    public int Id { get; set; }
+    public Guid Id { get; set; } = Guid.NewGuid();
     public required string Title { get; set; }
     public string? Description { get; set; }
     public bool IsCompleted { get; set; }
@@ -41,7 +41,7 @@ internal class LoanRequest : ITenantEntityV2
 | Аспект | Todo API | Skynet |
 |---|---|---|
 | Видимость | `public` | `internal` — entity не выходит за пределы Infrastructure слоя |
-| Типы ID | `int Id` | `LoanRequestId Id` — strongly-typed ID обертки (типобезопасность: нельзя случайно передать `CompanyId` вместо `ApplicationId`) |
+| Типы ID | `Guid Id` | `LoanRequestId Id` — strongly-typed ID обертки (типобезопасность: нельзя случайно передать `CompanyId` вместо `ApplicationId`). Todo API использует `Guid` — ближе к Skynet, чем `int` |
 | Multi-tenancy | нет | `ITenantEntityV2` + `CompanyId` — каждая строка привязана к компании-арендатору |
 | Конфигурация | Fluent API в `OnModelCreating` | Отдельный класс `IEntityTypeConfiguration<LoanRequest>` — entity ничего не знает о БД |
 | JSON-колонки | нет | `LoanRequestContent` — owned type, сериализуется в JSON-колонку (`HasConversion`) |
@@ -58,8 +58,8 @@ internal class LoanRequest : ITenantEntityV2
 [Produces("application/json")]
 public sealed class TodosController(IMediator mediator) : ControllerBase
 {
-    [HttpGet("{id:int}")]
-    public async Task<IActionResult> GetById(int id, CancellationToken ct)
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> GetById(Guid id, CancellationToken ct)
     {
         var todo = await mediator.Send(new GetTodoByIdQuery(id), ct);
         return todo is not null ? Ok(todo) : NotFound();
@@ -170,7 +170,7 @@ internal sealed class CreateLoanExceptionCommandHandler(
 ### Todo API — `Source/TodoApi.Application/Todos/GetTodoByIdQuery.cs`
 
 ```csharp
-public sealed record GetTodoByIdQuery(int Id) : IRequest<TodoItem?>;
+public sealed record GetTodoByIdQuery(Guid Id) : IRequest<TodoItem?>;
 
 public sealed class GetTodoByIdHandler(ITodoRepository repository)
     : IRequestHandler<GetTodoByIdQuery, TodoItem?>
@@ -270,7 +270,7 @@ internal class LoansDbContext : DbContext
 public interface ITodoRepository
 {
     Task<List<TodoItem>> GetAllAsync(CancellationToken ct);
-    Task<TodoItem?> GetByIdAsync(int id, CancellationToken ct);
+    Task<TodoItem?> GetByIdAsync(Guid id, CancellationToken ct);
     Task<TodoItem> CreateAsync(TodoItem item, CancellationToken ct);
     Task UpdateAsync(TodoItem item, CancellationToken ct);
     Task DeleteAsync(TodoItem item, CancellationToken ct);
@@ -330,19 +330,31 @@ internal sealed class PurchaseAdviceRepository(LoansDbContext db) : IPurchaseAdv
 
 ## 7. FluentValidation
 
-### Todo API — `Source/TodoApi.Application/Todos/CreateTodoCommandValidator.cs`
+### Todo API — `Source/TodoApi.Application/Todos/`
 
 ```csharp
+// TodoValidationRules.cs — общие правила (extension methods):
+public static partial class TodoValidationRules
+{
+    [GeneratedRegex(@"^[a-zA-Z0-9\s\p{P}\p{S}]*$")]
+    private static partial Regex LatinOnlyRegex();
+
+    public static IRuleBuilderOptions<T, string> ValidTitle<T>(this IRuleBuilder<T, string> rule)
+    {
+        return rule
+            .NotEmpty().WithMessage("Title is required")
+            .MaximumLength(200).WithMessage("Title must be 200 characters or fewer")
+            .Matches(LatinOnlyRegex()).WithMessage("Title must contain only Latin characters");
+    }
+}
+
+// CreateTodoCommandValidator.cs — переиспользует ValidTitle() / ValidDescription():
 public sealed class CreateTodoCommandValidator : AbstractValidator<CreateTodoCommand>
 {
     public CreateTodoCommandValidator()
     {
-        RuleFor(x => x.Title)
-            .NotEmpty().WithMessage("Title is required")
-            .MaximumLength(200).WithMessage("Title must be 200 characters or fewer");
-
-        RuleFor(x => x.Description)
-            .MaximumLength(1000).WithMessage("Description must be 1000 characters or fewer");
+        RuleFor(x => x.Title).ValidTitle();
+        RuleFor(x => x.Description).ValidDescription();
     }
 }
 ```
@@ -373,9 +385,11 @@ internal sealed class CreateTradeDtoValidator : AbstractValidator<CreateTradeDto
 
 | Аспект | Todo API | Skynet |
 |---|---|---|
-| Файл | Отдельный файл `*Validator.cs` | Внутри файла handler'а — validator и handler рядом |
-| Регистрация | Через DI (`AddValidatorsFromAssembly`) | `private static readonly` поле на handler'е — вызывается явно: `Validator.ValidateAndThrow(dto)` |
-| Сложность правил | Простые (`NotEmpty`, `MaximumLength`) | Условные (`.When()`), кросс-поля (`.GreaterThan(x => x.TradeDate)`), доменные проверки (`1/16th increments`), вложенные (`RuleForEach` + `ChildRules`) |
+| Файл | Общие правила в `TodoValidationRules.cs` (extension methods), отдельный `*Validator.cs` на каждую command | Внутри файла handler'а — validator и handler рядом |
+| Регистрация | Через DI (`AddValidatorsFromAssembly`) + `ValidationBehavior` pipeline | `private static readonly` поле на handler'е — вызывается явно: `Validator.ValidateAndThrow(dto)` |
+| Pipeline | `ValidationBehavior<TRequest, TResponse>` — MediatR `IPipelineBehavior`, автоматически запускает валидацию ДО handler'а | `IPipelineBehavior` для авторизации; валидация — вручную в handler'е |
+| Переиспользование | Extension methods (`ValidTitle()`, `ValidDescription()`) — одно место правды для Create и Update | Каждый validator самостоятельный |
+| Сложность правил | `NotEmpty`, `MaximumLength`, `Matches(regex)` для Latin-only | Условные (`.When()`), кросс-поля (`.GreaterThan(x => x.TradeDate)`), доменные проверки (`1/16th increments`), вложенные (`RuleForEach` + `ChildRules`) |
 
 ---
 
@@ -392,7 +406,10 @@ builder.Services.AddDbContext<TodoDbContext>(options =>
     options.UseSqlite("Data Source=todo.db"));
 builder.Services.AddScoped<ITodoRepository, TodoRepository>();
 builder.Services.AddMediatR(cfg =>
-    cfg.RegisterServicesFromAssemblyContaining<CreateTodoCommand>());
+{
+    cfg.RegisterServicesFromAssemblyContaining<CreateTodoCommand>();
+    cfg.AddOpenBehavior(typeof(ValidationBehavior<,>));
+});
 builder.Services.AddValidatorsFromAssemblyContaining<CreateTodoCommandValidator>();
 
 var app = builder.Build();
@@ -401,6 +418,8 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<TodoDbContext>();
     db.Database.Migrate();
 }
+app.UseCors();
+app.UseExceptionHandler(...);  // ValidationException → 400 JSON
 app.UseSwagger();
 app.UseSwaggerUI();
 app.MapControllers();
@@ -442,7 +461,7 @@ services.AddScoped<ITasksRepository, TasksRepository>();
 | DbContext | `AddDbContext<T>()` | `AddPooledDbContextFactory<T>()` + ручной scoped resolve |
 | Миграции | Auto-migrate на старте | Миграции НЕ запускаются из кода — только через CI/CD pipeline |
 | Конфигурация | Hardcoded connection string | Azure Key Vault + `IConfiguration` |
-| Middleware | Swagger only | Auth, CORS, rate limiting, health checks, ServiceBus, OpenTelemetry |
+| Middleware | CORS, ExceptionHandler (ValidationException → 400), Swagger | Auth, CORS, rate limiting, health checks, ServiceBus, OpenTelemetry |
 | Репозитории | 1 `AddScoped` | 40+ отдельных `AddScoped` — никакого auto-scanning |
 
 ---
@@ -538,13 +557,16 @@ public class GetSubCompanyActiveLoanCountQueryHandlerTests
 - Repository pattern (interface в Application, implementation в Infrastructure)
 - Controller как тонкий passthrough к MediatR
 - EF Core + Fluent API
+- FluentValidation + `ValidationBehavior` MediatR pipeline (валидация ДО handler'а)
+- Guid-based IDs (безопасность + распределённая генерация)
+- Переиспользование правил через extension methods
 - xUnit + NSubstitute
 - `CancellationToken` everywhere
 
 ### Что добавляет production
 
 - **Multi-tenancy** — `CompanyId` и `AuthorizationContext` пронизывают всё
-- **Strongly-typed IDs** — `LoanRequestId` вместо `int` / `Guid`
+- **Strongly-typed IDs** — `LoanRequestId` вместо голого `Guid` (типобезопасность: нельзя перепутать `CompanyId` с `ApplicationId`)
 - **Entity/Model separation** — репозиторий маппит entity <-> domain model
 - **`internal` visibility** — entities, handlers, repos скрыты от внешних слоёв
 - **Pooled DbContext** — `AddPooledDbContextFactory` для производительности
